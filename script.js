@@ -4,6 +4,7 @@ const elements = {
   book: document.getElementById("book"),
   bookTitle: document.getElementById("bookTitle"),
   sceneMeta: document.getElementById("sceneMeta"),
+  imagePage: document.getElementById("imagePage"),
   sceneImage: document.getElementById("sceneImage"),
   sceneTitle: document.getElementById("sceneTitle"),
   pageSource: document.getElementById("pageSource"),
@@ -66,12 +67,13 @@ function render() {
 
   document.body.dataset.font = state.fontMode;
   elements.bookTitle.textContent = story.title;
+  elements.imagePage.classList.remove("is-missing");
   elements.sceneImage.src = spread.image;
   elements.sceneImage.alt = spread.imageAlt;
   elements.sceneTitle.textContent = spread.sceneTitle;
   elements.pageSource.textContent = `صفحة ${toArabicNumber(spread.sourcePage)} من الأصل`;
   elements.chunkSource.textContent = `${toArabicNumber(spread.chunk)} / ${toArabicNumber(spread.chunks)}`;
-  elements.storyText.textContent = spread.text;
+  fillStoryText(elements.storyText, spread.text);
   elements.sceneMeta.textContent = `مشهد ${toArabicNumber(spread.sourcePage)} · قلبة ${toArabicNumber(pageNumber)}`;
   elements.progressText.textContent = `${toArabicNumber(pageNumber)} من ${toArabicNumber(story.spreads.length)}`;
   elements.progressFill.style.width = `${progress}%`;
@@ -93,6 +95,58 @@ function preloadImage(index) {
   image.src = story.spreads[index].image;
 }
 
+function splitStoryBlocks(text) {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  const sentences = normalized.match(/[^.!؟!؛]+[.!؟!؛]*/g) || [normalized];
+  const blocks = [];
+  let current = "";
+
+  for (const sentence of sentences.map((item) => item.trim()).filter(Boolean)) {
+    const shouldStandAlone = isDialogueText(sentence) || sentence.length > 170;
+    if (shouldStandAlone && current) {
+      blocks.push(current);
+      current = "";
+    }
+
+    if (shouldStandAlone) {
+      blocks.push(sentence);
+      continue;
+    }
+
+    const candidate = current ? `${current} ${sentence}` : sentence;
+    if (candidate.length > 155) {
+      if (current) blocks.push(current);
+      current = sentence;
+    } else {
+      current = candidate;
+    }
+  }
+
+  if (current) blocks.push(current);
+  return blocks;
+}
+
+function isDialogueText(text) {
+  return /["“”«»]/.test(text) || ["قال", "قلت", "صرخت", "سأل", "أجاب", "همس", "أكمل", "تابع"].some((word) => text.includes(word));
+}
+
+function blockType(text) {
+  if (isDialogueText(text)) return "dialogue";
+  if (["في داخلي", "شعرت", "تمنيت", "وجدت نفسي", "لم أستطع"].some((word) => text.includes(word))) return "inner";
+  return "narrative";
+}
+
+function fillStoryText(container, text) {
+  const fragment = document.createDocumentFragment();
+  splitStoryBlocks(text).forEach((blockText) => {
+    const block = document.createElement("p");
+    block.className = `story-block story-block--${blockType(blockText)}`;
+    block.textContent = blockText;
+    fragment.append(block);
+  });
+  container.replaceChildren(fragment);
+}
+
 function makeTextFragment(spread) {
   const fragment = document.createElement("div");
   fragment.className = "turn-fragment turn-fragment--text";
@@ -106,11 +160,12 @@ function makeTextFragment(spread) {
   const chunk = document.createElement("span");
   chunk.textContent = `${toArabicNumber(spread.chunk)} / ${toArabicNumber(spread.chunks)}`;
 
-  const paragraph = document.createElement("p");
-  paragraph.textContent = spread.text;
+  const text = document.createElement("div");
+  text.className = "story-text";
+  fillStoryText(text, spread.text);
 
   mark.append(source, chunk);
-  fragment.append(mark, paragraph);
+  fragment.append(mark, text);
   return fragment;
 }
 
@@ -194,14 +249,14 @@ function handlePointerEnd(event) {
   state.pointerStart = null;
 
   if (Math.abs(dx) > 34 && Math.abs(dx) > Math.abs(dy) && elapsed < 900) {
-    turn(dx < 0 ? "next" : "prev");
+    turn(dx > 0 ? "next" : "prev");
     return;
   }
 
   const rect = elements.book.getBoundingClientRect();
   const tapX = event.clientX - rect.left;
-  if (tapX < rect.width * 0.36) turn("next");
-  if (tapX > rect.width * 0.64) turn("prev");
+  if (tapX > rect.width * 0.64) turn("next");
+  if (tapX < rect.width * 0.36) turn("prev");
 }
 
 elements.nextBtn.addEventListener("click", () => turn("next"));
@@ -213,10 +268,16 @@ elements.book.addEventListener("pointerup", handlePointerEnd);
 elements.book.addEventListener("pointercancel", () => {
   state.pointerStart = null;
 });
+elements.sceneImage.addEventListener("load", () => {
+  elements.imagePage.classList.remove("is-missing");
+});
+elements.sceneImage.addEventListener("error", () => {
+  elements.imagePage.classList.add("is-missing");
+});
 
 window.addEventListener("keydown", (event) => {
-  if (event.key === "ArrowLeft") turn("next");
-  if (event.key === "ArrowRight") turn("prev");
+  if (event.key === "ArrowRight") turn("next");
+  if (event.key === "ArrowLeft") turn("prev");
   if (event.key === "+" || event.key === "=") setFontMode(1);
   if (event.key === "-") setFontMode(-1);
 });
